@@ -312,7 +312,7 @@ class TerraformComment:
         return summary
 
     def update_comment(self):
-        body = self.collapsable_body()
+        body = self.body()
         debug(body)
 
         if self._comment_url is None:
