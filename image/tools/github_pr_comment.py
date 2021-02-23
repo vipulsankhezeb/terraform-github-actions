@@ -114,9 +114,13 @@ class TerraformComment:
     The GitHub comment for this specific terraform plan
     """
 
-    def __init__(self, pr_url: str):
+    def __init__(self, pr_url: str=None):
         self._plan = None
         self._status = None
+        self._comment_url = None
+
+        if pr_url is None:
+            return
 
         response = github_api_request('get', pr_url)
         response.raise_for_status()
@@ -125,20 +129,18 @@ class TerraformComment:
         response = github_api_request('get', self._issue_url)
         response.raise_for_status()
 
-        self._comment_url = None
         debug('Looking for an existing comment:')
         for comment in response.json():
             debug(json.dumps(comment))
             if comment['user']['login'] == current_user():
-                match = re.match(rf'{re.escape(self._comment_identifier)}\n```(?:hcl)?(.*?)```(.*)', comment['body'], re.DOTALL)
+                match = re.match(rf'{re.escape(self._comment_identifier)}.*```(?:hcl)?(.*?)```.*', comment['body'], re.DOTALL)
 
                 if not match:
-                    match = re.match(rf'{re.escape(self._old_comment_identifier)}\n```(.*?)```(.*)', comment['body'], re.DOTALL)
+                    match = re.match(rf'{re.escape(self._old_comment_identifier)}\n```(.*?)```.*', comment['body'], re.DOTALL)
 
                 if match:
                     self._comment_url = comment['url']
                     self._plan = match.group(1).strip()
-                    self._status = match.group(2).strip()
                     return
 
     @property
@@ -270,12 +272,47 @@ class TerraformComment:
     def status(self, status: str) -> None:
         self._status = status.strip()
 
-    def update_comment(self):
+    def body(self) -> str:
         body = f'{self._comment_identifier}\n```hcl\n{self.plan}\n```'
 
         if self.status:
             body += '\n' + self.status
 
+        return body
+
+    def collapsable_body(self) -> str:
+        body = f'''{self._comment_identifier}
+<details>
+  <summary>{self.summary()}</summary>
+
+```hcl
+{self.plan}
+```
+</details>
+'''
+
+        if self.status:
+            body += '\n' + self.status
+
+        return body
+
+    def summary(self) -> str:
+        summary = None
+
+        for line in self.plan.splitlines():
+            if line.startswith('No changes') or line.startswith('Error'):
+                return line
+
+            if line.startswith('Plan:'):
+                summary = line
+
+            if line.startswith('Changes to Outputs'):
+                return summary + ' Changes to Outputs.'
+
+        return summary
+
+    def update_comment(self):
+        body = self.collapsable_body()
         debug(body)
 
         if self._comment_url is None:
@@ -313,5 +350,6 @@ if __name__ == '__main__':
         if tf_comment.plan is None:
             exit(1)
         print(tf_comment.plan)
+        exit(0)
 
     tf_comment.update_comment()
